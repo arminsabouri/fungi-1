@@ -1,0 +1,28 @@
+name: flake checks
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute fetch depth
+        id: fetch-depth
+        run: echo "depth=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ steps.fetch-depth.outputs.depth }}
+      - name: Check Nix flake inputs
+        uses: DeterminateSystems/flake-checker-action@de924abd783455e8429c858962b9e43062d19da1 # v13
+        with:
+          check-owner: "false"
+          check-supported: "false"
+          ignore-missing-flake-lock: "false"
+          fail-mode: "true"
+          send-statistics: "false"
+      - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - uses: DeterminateSystems/magic-nix-cache-action@55718cd9ebf1737a061487d5ada21abf31e99a98 # main
+      - name: Validate commits
+        run: >-
+          nix run --no-update-lock-file '.?shallow=1#validate-commits' -- '${{ github.event.pull_request.base.sha }}..HEAD'
