@@ -94,6 +94,47 @@ impl PayoffCurve {
     pub fn breakpoints(&self) -> &[(Instant, Amount)] {
         &self.0
     }
+
+    /// What realizing the intent is worth at `at`, interpolated between the breakpoints
+    /// on either side of it.
+    ///
+    /// Outside the curve the nearer end holds: nothing before the first breakpoint, and
+    /// the last breakpoint's worth from then on. Both ends being pinned down is what
+    /// makes that an answer rather than a guess.
+    pub fn payoff(&self, at: Instant) -> Amount {
+        let &(first_at, first) = self.0.first().expect("checked length");
+        if at <= first_at {
+            return first;
+        }
+
+        for pair in self.0.windows(2) {
+            let (start_at, start) = pair[0];
+            let (end_at, end) = pair[1];
+
+            if at <= end_at {
+                return interpolate(start_at, start, end_at, end, at);
+            }
+        }
+
+        self.0.last().expect("checked length").1
+    }
+}
+
+/// Where a straight line from `start` to `end` sits at `at`.
+///
+/// The span is never zero, because breakpoints strictly advance in time.
+fn interpolate(
+    start_at: Instant,
+    start: Amount,
+    end_at: Instant,
+    end: Amount,
+    at: Instant,
+) -> Amount {
+    let span = end_at.saturating_duration_since(start_at).as_nanos() as i128;
+    let elapsed = at.saturating_duration_since(start_at).as_nanos() as i128;
+    let climb = i128::from(end.to_sat()) - i128::from(start.to_sat());
+
+    Amount::from_sat((i128::from(start.to_sat()) + climb * elapsed / span) as u64)
 }
 
 /// An [`Intent`] together with what the user is willing to trade for it.
@@ -248,6 +289,55 @@ mod tests {
         assert_eq!(
             curve.breakpoints()[1],
             (start + Duration::from_secs(1800), Amount::from_sat(100_000))
+        );
+    }
+
+    #[test]
+    fn payoff_climbs_and_falls_in_a_straight_line_between_breakpoints() {
+        let start = Instant::now();
+        let curve = single_peaked(start);
+
+        assert_eq!(curve.payoff(start), Amount::ZERO);
+        assert_eq!(
+            curve.payoff(start + Duration::from_secs(900)),
+            Amount::from_sat(50_000)
+        );
+        assert_eq!(
+            curve.payoff(start + Duration::from_secs(1800)),
+            Amount::from_sat(100_000)
+        );
+        assert_eq!(
+            curve.payoff(start + Duration::from_secs(2700)),
+            Amount::from_sat(50_000)
+        );
+    }
+
+    /// The declared ends hold in both directions, so every instant has an answer.
+    #[test]
+    fn payoff_outside_the_curve_holds_the_nearer_end() {
+        let start = Instant::now();
+        let curve = single_peaked(start);
+
+        assert_eq!(curve.payoff(start - Duration::from_secs(600)), Amount::ZERO);
+        assert_eq!(
+            curve.payoff(start + Duration::from_secs(7200)),
+            Amount::ZERO
+        );
+    }
+
+    /// A curve that ends at its peak keeps paying that from the deadline on, which is
+    /// what makes it a must-do rather than an opportunity.
+    #[test]
+    fn payoff_past_a_plateau_stays_at_the_peak() {
+        let start = Instant::now();
+        let peak = start + Duration::from_secs(60);
+        let curve = PayoffCurve::new(vec![(start, Amount::ZERO), (peak, Amount::from_sat(100))])
+            .expect("plateau is a closed end");
+
+        assert_eq!(curve.payoff(peak), Amount::from_sat(100));
+        assert_eq!(
+            curve.payoff(peak + Duration::from_secs(600)),
+            Amount::from_sat(100)
         );
     }
 
