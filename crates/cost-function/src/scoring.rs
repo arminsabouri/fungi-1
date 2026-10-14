@@ -23,6 +23,18 @@ impl Scorer {
         objective_cost.checked_sub(payment_utility)
     }
 
+    /// The [`cost`](Self::cost) of each transaction of a plan, summed. `None` if any of
+    /// them, or their sum, overflows.
+    pub(crate) fn plan_cost<Id: Eq + Hash>(
+        &self,
+        diffs: &[WalletStateDiff<Id>],
+        instant: Instant,
+    ) -> Option<SignedAmount> {
+        diffs.iter().try_fold(SignedAmount::ZERO, |sum, diff| {
+            sum.checked_add(self.cost(diff, instant)?)
+        })
+    }
+
     /// The value of the coins `diff` spends, minus the value of the change it pays back:
     /// what the payments and the fee take out of the wallet.
     ///
@@ -167,6 +179,17 @@ mod tests {
         assert_eq!(
             Scorer.cost(&diff, now),
             Some(SignedAmount::from_sat(-9_000))
+        );
+    }
+
+    /// One transaction costs 31,000 sats and the other 5,000.
+    #[test]
+    fn plan_cost_sums_its_transactions() {
+        let diffs = [diff(&[100_000], &[69_000]), diff(&[50_000], &[45_000])];
+
+        assert_eq!(
+            Scorer.plan_cost(&diffs, Instant::now()),
+            Some(SignedAmount::from_sat(36_000))
         );
     }
 }
