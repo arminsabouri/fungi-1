@@ -1,6 +1,6 @@
 //! The interface a sans-io state machine exposes to whatever drives it.
 
-use crate::persist::PersistActions;
+use crate::persist::{PersistActions, Persister};
 
 /// A state machine that turns inputs into events to record and effects to run.
 pub trait StateMachine {
@@ -27,4 +27,15 @@ pub trait StateMachine {
 pub struct Decision<Event, Effect> {
     pub persist: PersistActions<Event>,
     pub effects: Vec<Effect>,
+}
+
+/// Rebuild a state machine by applying every event in `persister` to `initial`.
+pub fn replay<SM, P>(initial: SM, persister: &P) -> Result<SM, P::InternalStorageError>
+where
+    SM: StateMachine,
+    P: Persister<SessionEvent = SM::Event>,
+{
+    Ok(persister
+        .load()?
+        .fold(initial, |sm, event| sm.apply(&event)))
 }
