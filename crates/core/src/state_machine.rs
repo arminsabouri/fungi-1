@@ -39,3 +39,25 @@ where
         .load()?
         .fold(initial, |sm, event| sm.apply(&event)))
 }
+
+/// Persist `decision`'s event and return the next state with the effects to run.
+///
+/// Effects come back only once the event is stored, so none run for a transition that was not
+/// recorded.
+pub fn commit<SM, P>(
+    sm: SM,
+    decision: Decision<SM::Event, SM::Effect>,
+    persister: &P,
+) -> Result<(SM, Vec<SM::Effect>), P::InternalStorageError>
+where
+    SM: StateMachine,
+    P: Persister<SessionEvent = SM::Event>,
+{
+    let next = match &decision.persist {
+        PersistActions::NoOp => sm,
+        PersistActions::Save(event) | PersistActions::SaveAndClose(event) => sm.apply(event),
+    };
+    decision.persist.execute(persister)?;
+
+    Ok((next, decision.effects))
+}
