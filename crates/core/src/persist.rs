@@ -1,5 +1,8 @@
 //! Storage for the event logs a state machine replays.
 
+use std::convert::Infallible;
+use std::sync::Mutex;
+
 /// An append only log of the events one session produced.
 pub trait Persister {
     /// Whatever the storage layer underneath fails with.
@@ -50,42 +53,72 @@ impl<Event> PersistActions<Event> {
     }
 }
 
+/// A session log held in memory, lost when it is dropped.
+///
+/// # Panics
+///
+/// [`Persister::save_event`] panics if the session is closed.
+pub struct InMemoryPersister<Event> {
+    log: Mutex<Log<Event>>,
+}
+
+struct Log<Event> {
+    events: Vec<Event>,
+    closed: bool,
+}
+
+impl<Event> Default for InMemoryPersister<Event> {
+    fn default() -> Self {
+        Self {
+            log: Mutex::new(Log {
+                events: Vec::new(),
+                closed: false,
+            }),
+        }
+    }
+}
+
+impl<Event: Clone + 'static> Persister for InMemoryPersister<Event> {
+    type InternalStorageError = Infallible;
+    type SessionEvent = Event;
+
+    fn save_event(&self, event: Event) -> Result<(), Infallible> {
+        let mut log = self.log.lock().expect("lock poisoned");
+        assert!(!log.closed, "event saved to a closed session");
+        log.events.push(event);
+        Ok(())
+    }
+
+    fn load(&self) -> Result<Box<dyn Iterator<Item = Event>>, Infallible> {
+        let log = self.log.lock().expect("lock poisoned");
+        Ok(Box::new(log.events.clone().into_iter()))
+    }
+
+    fn close(&self) -> Result<(), Infallible> {
+        self.log.lock().expect("lock poisoned").closed = true;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use std::convert::Infallible;
 
-    #[derive(Default)]
-    struct InMemoryPersister {
-        events: RefCell<Vec<u8>>,
-        closed: RefCell<bool>,
-    }
-
-    impl Persister for InMemoryPersister {
-        type InternalStorageError = Infallible;
-        type SessionEvent = u8;
-
-        fn save_event(&self, event: u8) -> Result<(), Infallible> {
-            assert!(!*self.closed.borrow());
-            self.events.borrow_mut().push(event);
-            Ok(())
+    impl<Event: Clone> InMemoryPersister<Event> {
+        fn events(&self) -> Vec<Event> {
+            self.log.lock().unwrap().events.clone()
         }
 
-        fn load(&self) -> Result<Box<dyn Iterator<Item = u8>>, Infallible> {
-            Ok(Box::new(self.events.borrow().clone().into_iter()))
-        }
-
-        fn close(&self) -> Result<(), Infallible> {
-            *self.closed.borrow_mut() = true;
-            Ok(())
+        fn closed(&self) -> bool {
+            self.log.lock().unwrap().closed
         }
     }
 
     #[test]
     fn events_load_in_the_order_they_were_saved() {
-        let persister = InMemoryPersister::default();
+        let persister = InMemoryPersister::<u8>::default();
 
         persister
             .save_event(1)
@@ -104,15 +137,15 @@ mod tests {
 
     #[test]
     fn a_closed_session_says_so() {
-        let persister = InMemoryPersister::default();
+        let persister = InMemoryPersister::<u8>::default();
 
         persister.close().expect("in memory storage cannot fail");
 
-        assert!(*persister.closed.borrow());
+        assert!(persister.closed());
     }
 
-    fn execute(action: PersistActions<u8>) -> InMemoryPersister {
-        let persister = InMemoryPersister::default();
+    fn execute(action: PersistActions<u8>) -> InMemoryPersister<u8> {
+        let persister = InMemoryPersister::<u8>::default();
 
         action
             .execute(&persister)
@@ -125,24 +158,24 @@ mod tests {
     fn a_no_op_records_nothing() {
         let persister = execute(PersistActions::NoOp);
 
-        assert!(persister.events.borrow().is_empty());
-        assert!(!*persister.closed.borrow());
+        assert!(persister.events().is_empty());
+        assert!(!persister.closed());
     }
 
     #[test]
     fn a_save_leaves_the_session_open() {
         let persister = execute(PersistActions::Save(1));
 
-        assert_eq!(*persister.events.borrow(), [1]);
-        assert!(!*persister.closed.borrow());
+        assert_eq!(persister.events(), [1]);
+        assert!(!persister.closed());
     }
 
     #[test]
     fn a_closing_save_records_the_event_first() {
         let persister = execute(PersistActions::SaveAndClose(1));
 
-        assert_eq!(*persister.events.borrow(), [1]);
-        assert!(*persister.closed.borrow());
+        assert_eq!(persister.events(), [1]);
+        assert!(persister.closed());
     }
 
     #[derive(Debug, PartialEq, Eq)]
