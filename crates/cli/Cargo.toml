@@ -1,0 +1,12 @@
+[package]
+name = "fungi-cli"
+description = "Command-line client for fungid"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+fungi-rpc = { path = "../rpc" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
