@@ -6,18 +6,18 @@ use crate::{batch::Batch, plan::PlanIntent, queue::Queue};
 
 /// Plans for the queued intents, starting with the grand coalition, one batch of every
 /// queued intent, and peeling intents off it one at a time. An empty queue has no plans.
-pub(crate) struct DecisionSpace<'a, Q> {
+pub struct DecisionSpace<'a, Q> {
     queue: &'a Q,
 }
 
 impl<'a, Q: Queue> DecisionSpace<'a, Q> {
-    pub(crate) fn new(queue: &'a Q) -> Self {
+    pub fn new(queue: &'a Q) -> Self {
         DecisionSpace { queue }
     }
 
     // currently this yields only the trivial partition, peel intents off once there is a cost to compare.
     // TODO: this should iterate and peel off one intent, putting it in its own batch each time.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = PlanIntent<Q::Id>> {
+    pub fn iter(&self) -> impl Iterator<Item = PlanIntent<Q::Id>> {
         let intents: BTreeSet<Q::Id> = self.queue.iter().map(|(id, _)| id).collect();
 
         (!intents.is_empty())

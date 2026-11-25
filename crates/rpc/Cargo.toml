@@ -1,0 +1,13 @@
+[package]
+name = "fungi-rpc"
+description = "JSON-RPC types and client for talking to fungid"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

@@ -141,6 +141,11 @@ impl Intent {
         }
     }
 
+    /// What the user wants to happen.
+    pub fn outcome(&self) -> &Outcome {
+        &self.inner
+    }
+
     /// The output that pays for this intent.
     pub(crate) fn payment_output(&self) -> TxOut {
         match &self.inner {
